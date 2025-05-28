@@ -10,7 +10,7 @@ from photo_frame import FrameSettings, process_photo
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
     raise ValueError("Нет TELEGRAM_BOT_TOKEN в переменных окружения!")
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 user_settings = {}
