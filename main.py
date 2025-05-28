@@ -1,140 +1,103 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InputFile
-from aiogram.utils import executor
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-
-import tempfile
+import asyncio
+import logging
 import os
-from photo_frame import add_frame_to_image
 
-API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not API_TOKEN:
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import FSInputFile
+from aiogram.enums import ParseMode
+
+from photo_frame import add_frame_to_image  # твоя функция из другого файла
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
     raise ValueError("Нет TELEGRAM_BOT_TOKEN в переменных окружения!")
+# Логгирование
+logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+# Бот и диспетчер
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
+# Хранилище настроек на пользователя
 user_settings = {}
 
-@dp.message_handler(commands=["start"])
-async def cmd_start(message: types.Message):
+
+@dp.message(Command("start"))
+async def start_handler(message: types.Message):
     user_settings[message.from_user.id] = {
-        "aspect_ratio": "1:1",
-        "border_thickness": "5%",
-        "border_color": "#ffffff",
+        "color": "white",
+        "thickness": "5%",
+        "aspect": "1:1",
         "quality": 95,
     }
-    await message.answer(
-        "Привет! Я добавляю рамку к фотографиям.\n\n"
-        "\U0001F4D0 Изменить формат рамки: /ratio\n"
-        "\U0001F3A8 Цвет рамки: /color\n"
-        "\U0001F4CF Толщина: /thickness\n"
-        "\U0001F5DC️ Качество JPEG: /quality\n\n"
-        "Теперь просто пришли фото!"
-    )
+    await message.answer("Привет! Отправь фото, а я добавлю рамку.\n"
+                         "Настрой: /setcolor /setthickness /setaspect /setquality")
 
-@dp.message_handler(commands=["ratio"])
-async def cmd_ratio(message: types.Message):
-    await message.answer(
-        "Выберите соотношение сторон:\n"
-        "\U0001F4F7 /square (1:1)\n"
-        "\U0001F4F1 /portrait (4:5)\n"
-        "\U0001F4D6 /story (9:16)\n"
-        "\U0001F5BC️ /landscape (16:9)"
-    )
 
-@dp.message_handler(commands=["square", "portrait", "story", "landscape"])
-async def set_preset_ratio(message: types.Message):
-    user_id = message.from_user.id
-    preset_map = {
-        "square": "1:1",
-        "portrait": "4:5",
-        "story": "9:16",
-        "landscape": "16:9",
-    }
-    preset = message.get_command()[1:]
-    user_settings[user_id]["aspect_ratio"] = preset_map[preset]
-    await message.answer(f"Соотношение установлено: {preset_map[preset]}")
+@dp.message(Command("setcolor"))
+async def set_color(message: types.Message):
+    user_settings[message.from_user.id]["color"] = message.text.split(maxsplit=1)[1]
+    await message.answer(f"Цвет рамки установлен: {message.text.split(maxsplit=1)[1]}")
 
-@dp.message_handler(commands=["thickness"])
-async def cmd_thickness(message: types.Message):
-    await message.answer("Введите толщину рамки в % или пикселях (например, 5% или 30):")
-    user_settings[message.from_user.id]["awaiting"] = "thickness"
 
-@dp.message_handler(commands=["color"])
-async def cmd_color(message: types.Message):
-    await message.answer("Введите цвет рамки (например, #ffffff, red, rgb(255,0,0)):")
-    user_settings[message.from_user.id]["awaiting"] = "color"
+@dp.message(Command("setthickness"))
+async def set_thickness(message: types.Message):
+    user_settings[message.from_user.id]["thickness"] = message.text.split(maxsplit=1)[1]
+    await message.answer(f"Толщина рамки установлена: {message.text.split(maxsplit=1)[1]}")
 
-@dp.message_handler(commands=["quality"])
-async def cmd_quality(message: types.Message):
-    await message.answer("Введите качество JPEG (1–100):")
-    user_settings[message.from_user.id]["awaiting"] = "quality"
 
-@dp.message_handler(content_types=[types.ContentType.TEXT])
-async def handle_text(message: types.Message):
-    user_id = message.from_user.id
-    setting = user_settings.get(user_id, {}).get("awaiting")
+@dp.message(Command("setaspect"))
+async def set_aspect(message: types.Message):
+    user_settings[message.from_user.id]["aspect"] = message.text.split(maxsplit=1)[1]
+    await message.answer(f"Соотношение сторон установлено: {message.text.split(maxsplit=1)[1]}")
 
-    if not setting:
-        return
 
-    value = message.text
+@dp.message(Command("setquality"))
+async def set_quality(message: types.Message):
+    user_settings[message.from_user.id]["quality"] = int(message.text.split(maxsplit=1)[1])
+    await message.answer(f"Качество JPEG установлено: {message.text.split(maxsplit=1)[1]}")
 
-    if setting == "thickness":
-        user_settings[user_id]["border_thickness"] = value
-        await message.answer(f"Толщина установлена: {value}")
 
-    elif setting == "color":
-        from PIL import ImageColor
-        try:
-            ImageColor.getrgb(value)
-            user_settings[user_id]["border_color"] = value
-            await message.answer(f"Цвет установлен: {value}")
-        except:
-            await message.answer("Неверный формат цвета. Попробуйте ещё раз.")
-            return
-
-    elif setting == "quality":
-        try:
-            q = int(value)
-            if 1 <= q <= 100:
-                user_settings[user_id]["quality"] = q
-                await message.answer(f"Качество установлено: {q}")
-            else:
-                await message.answer("Введите значение от 1 до 100.")
-                return
-        except:
-            await message.answer("Введите целое число.")
-            return
-
-    user_settings[user_id].pop("awaiting", None)
-
-@dp.message_handler(content_types=types.ContentType.PHOTO)
+@dp.message(F.photo)
 async def handle_photo(message: types.Message):
     user_id = message.from_user.id
-    photo = message.photo[-1]
-    settings = user_settings.get(user_id)
-    if not settings:
-        await message.answer("Пожалуйста, начните с команды /start")
+    if user_id not in user_settings:
+        await message.answer("Сначала отправь /start")
         return
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        input_path = os.path.join(tmpdir, "input.jpg")
-        output_path = os.path.join(tmpdir, "output.jpg")
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+    input_path = f"{user_id}_input.jpg"
+    output_path = f"{user_id}_output.jpg"
 
-        await photo.download(destination_file=input_path)
+    await bot.download_file(file.file_path, input_path)
 
+    # Обработка в отдельном потоке
+    def process_file():
         add_frame_to_image(
             input_path,
             output_path,
-            aspect_ratio=settings["aspect_ratio"],
-            border_thickness=settings["border_thickness"],
-            border_color=settings["border_color"],
-            quality=settings["quality"]
+            aspect_ratio=user_settings[user_id]["aspect"],
+            border_thickness=user_settings[user_id]["thickness"],
+            border_color=user_settings[user_id]["color"],
+            quality=user_settings[user_id]["quality"],
         )
 
-        await message.answer_photo(InputFile(output_path))
+    await asyncio.to_thread(process_file)
+
+    # Отправка результата
+    output = FSInputFile(output_path)
+    await message.answer_photo(output)
+
+    # Удаление временных файлов
+    os.remove(input_path)
+    os.remove(output_path)
+
+
+async def main():
+    await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
