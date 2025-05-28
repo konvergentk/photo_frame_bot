@@ -8,7 +8,7 @@ import os
 from photo_frame import add_frame_to_image
 
 API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TOKEN:
+if not API_TOKEN:
     raise ValueError("Нет TELEGRAM_BOT_TOKEN в переменных окружения!")
 
 bot = Bot(token=API_TOKEN)
