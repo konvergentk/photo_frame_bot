@@ -1,166 +1,119 @@
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart, CommandObject, Command
-from aiogram.fsm.storage.memory import MemoryStorage
 import asyncio
-import os
-from photo_frame import FrameSettings, FrameProcessor
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from photo_frame import FrameSettings, process_photo
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("Нет TELEGRAM_BOT_TOKEN в переменных окружения!")
+API_TOKEN = "YOUR_TOKEN"
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
-
-settings = FrameSettings()
-processor = FrameProcessor(settings)
-
-# Цвета
-COLOR_CHOICES = {
-    "🔴 Красный": "red",
-    "🟢 Зелёный": "green",
-    "🔵 Синий": "blue",
-    "⚫ Чёрный": "black",
-    "⚪ Белый": "white",
-    "🟡 Жёлтый": "yellow",
-    "🟣 Фиолетовый": "purple",
-    "🟤 Коричневый": "brown",
-}
-
-# Толщина рамки
-THICKNESS_CHOICES = {
-    "5%": "5%",
-    "10%": "10%",
-    "15%": "15%",
-    "20%": "20%",
-    "30%": "30%",
-}
-
-# Соотношения сторон
-ASPECT_CHOICES = {
-    "1:1 (square)": "square",
-    "4:5 (portrait)": "portrait",
-    "9:16 (story)": "story",
-    "16:9 (landscape)": "landscape",
-}
-
-# Качество
-QUALITY_CHOICES = {
-    "🟢 95 (макс)": 95,
-    "🟡 85": 85,
-    "🔴 70 (эконом)": 70,
-}
+user_settings = {}
 
 
-# Клавиатуры
-def make_kb(options, prefix):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=f"{prefix}:{value}")]
-            for label, value in options.items()
-        ]
-    )
+def get_user_settings(user_id: int) -> FrameSettings:
+    return user_settings.setdefault(user_id, FrameSettings())
+
+
+def get_settings_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="📐 Соотношение", callback_data="set_ratio")
+    builder.button(text="🧱 Толщина", callback_data="set_thickness")
+    builder.button(text="🎨 Цвет", callback_data="set_color")
+    builder.adjust(2, 1)
+
+    return builder.as_markup()
 
 
 @dp.message(CommandStart())
-async def start(message: Message):
+async def cmd_start(message: Message):
+    user_settings[message.from_user.id] = FrameSettings()
     await message.answer(
-        "👋 Привет! Отправь фото, и я добавлю к нему рамку.\n"
-        "Ты можешь настроить параметры кнопками ниже:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🎨 Цвет рамки", callback_data="menu:color")],
-                [InlineKeyboardButton(text="🧱 Толщина рамки", callback_data="menu:thickness")],
-                [InlineKeyboardButton(text="📐 Соотношение сторон", callback_data="menu:aspect")],
-                [InlineKeyboardButton(text="📸 Качество JPG", callback_data="menu:quality")],
-            ]
-        ),
+        "👋 Привет! Отправь фото, чтобы добавить рамку. Настройки можно изменить ниже:",
+        reply_markup=get_settings_keyboard(),
     )
 
 
-# Команда на установку цвета вручную
-@dp.message(Command("setcolor"))
-async def cmd_setcolor(message: Message, command: CommandObject):
-    color = command.args
-    if not color:
-        await message.reply("❗ Используй `/setcolor <цвет>` (например: `/setcolor gold`)", parse_mode="Markdown")
-        return
+@dp.message(F.photo)
+async def handle_photo(message: Message):
+    user_id = message.from_user.id
+    settings = get_user_settings(user_id)
 
-    try:
-        settings.border_color = color
-        await message.reply(f"✅ Цвет рамки установлен: `{color}`", parse_mode="Markdown")
-    except Exception as e:
-        await message.reply(f"❌ Ошибка цвета: {e}")
+    photo = await message.photo[-1].download(destination=bytes)
+    result_io = await process_photo(photo, settings)
 
-
-# Меню настроек
-@dp.callback_query(F.data.startswith("menu:"))
-async def open_menu(callback: CallbackQuery):
-    menu = callback.data.split(":")[1]
-    if menu == "color":
-        await callback.message.edit_text("🎨 Выберите цвет рамки:", reply_markup=make_kb(COLOR_CHOICES, "color"))
-    elif menu == "thickness":
-        await callback.message.edit_text("🧱 Выберите толщину рамки:", reply_markup=make_kb(THICKNESS_CHOICES, "thickness"))
-    elif menu == "aspect":
-        await callback.message.edit_text("📐 Выберите соотношение сторон:", reply_markup=make_kb(ASPECT_CHOICES, "aspect"))
-    elif menu == "quality":
-        await callback.message.edit_text("📸 Выберите качество JPEG:", reply_markup=make_kb(QUALITY_CHOICES, "quality"))
-    await callback.answer()
+    await bot.send_photo(
+        chat_id=user_id,
+        photo=result_io,
+        caption="✅ Готово! Можешь изменить настройки и отправить следующее фото.",
+        reply_markup=get_settings_keyboard()
+    )
 
 
-# Обработчики inline-настроек
-@dp.callback_query(F.data.startswith("color:"))
-async def set_color(callback: CallbackQuery):
-    color = callback.data.split(":")[1]
-    try:
-        settings.border_color = color
-        await callback.message.edit_text(f"✅ Цвет рамки установлен: <code>{color}</code>", parse_mode=ParseMode.HTML)
-    except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка цвета: {e}")
-    await callback.answer()
+@dp.callback_query(F.data == "set_ratio")
+async def choose_ratio(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    for label in ["square", "portrait", "story", "landscape"]:
+        builder.button(text=label, callback_data=f"ratio:{label}")
+    builder.adjust(2, 2)
+    await callback.message.edit_text("Выбери соотношение сторон:", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.startswith("ratio:"))
+async def set_ratio(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    ratio = callback.data.split(":")[1]
+    get_user_settings(user_id).aspect_ratio = ratio
+    await callback.message.edit_text(
+        f"✅ Соотношение установлено: {ratio}", reply_markup=get_settings_keyboard()
+    )
+
+
+@dp.callback_query(F.data == "set_thickness")
+async def choose_thickness(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    for label in ["2%", "5%", "10%", "20px", "50px", "100px"]:
+        builder.button(text=label, callback_data=f"thickness:{label}")
+    builder.adjust(3, 3)
+    await callback.message.edit_text("Выбери толщину рамки:", reply_markup=builder.as_markup())
 
 
 @dp.callback_query(F.data.startswith("thickness:"))
-async def set_thickness(callback: CallbackQuery):
-    value = callback.data.split(":")[1]
-    settings.border_thickness = value
-    await callback.message.edit_text(f"✅ Толщина рамки установлена: <code>{value}</code>", parse_mode=ParseMode.HTML)
-    await callback.answer()
+async def set_thickness(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    thickness = callback.data.split(":")[1]
+    get_user_settings(user_id).border_thickness = thickness
+    await callback.message.edit_text(
+        f"✅ Толщина установлена: {thickness}", reply_markup=get_settings_keyboard()
+    )
 
 
-@dp.callback_query(F.data.startswith("aspect:"))
-async def set_aspect(callback: CallbackQuery):
-    value = callback.data.split(":")[1]
-    settings.aspect_ratio = value
-    await callback.message.edit_text(f"✅ Соотношение сторон установлено: <code>{value}</code>", parse_mode=ParseMode.HTML)
-    await callback.answer()
+@dp.callback_query(F.data == "set_color")
+async def ask_color_input(callback: types.CallbackQuery):
+    await callback.message.answer("🎨 Введите цвет в формате `#RRGGBB` или название (например, red):")
 
 
-@dp.callback_query(F.data.startswith("quality:"))
-async def set_quality(callback: CallbackQuery):
-    value = int(callback.data.split(":")[1])
-    settings.quality = value
-    await callback.message.edit_text(f"✅ Качество JPEG установлено: <code>{value}</code>", parse_mode=ParseMode.HTML)
-    await callback.answer()
+@dp.message(F.text)
+async def handle_color_or_error(message: types.Message):
+    text = message.text.strip()
+    user_id = message.from_user.id
+
+    if text.startswith("#") or text.lower() in {"red", "white", "black", "blue", "green", "yellow"}:
+        try:
+            get_user_settings(user_id).border_color = text
+            await message.answer(f"✅ Цвет установлен: {text}", reply_markup=get_settings_keyboard())
+        except Exception:
+            await message.answer("❌ Неверный формат цвета. Пример: `#ffcc00` или `green`")
+    else:
+        await message.answer("❓ Я не понимаю это сообщение. Пожалуйста, отправь фото или настройку.")
 
 
-# Фото
-@dp.message(F.photo)
-async def handle_photo(message: Message):
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    photo_bytes = await bot.download_file(file.file_path)
-
-    output = processor.process(photo_bytes)
-    await message.reply_document(document=output, caption="✅ Готово! Вот фото с рамкой.")
-
-
-# Запуск
 async def main():
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-
