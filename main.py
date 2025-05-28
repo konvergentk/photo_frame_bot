@@ -1,4 +1,5 @@
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
@@ -6,7 +7,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from photo_frame import FrameSettings, process_photo
 
-API_TOKEN = "YOUR_TOKEN"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("Нет TELEGRAM_BOT_TOKEN в переменных окружения!")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
