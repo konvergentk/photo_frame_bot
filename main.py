@@ -4,6 +4,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, CommandObject, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 import asyncio
+import os
 from photo_frame import FrameSettings, FrameProcessor
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
