@@ -1,28 +1,27 @@
 import os
 import tempfile
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
-from aiogram.types import Message
-from aiogram.utils import executor
-from photo_frame import add_frame
-
+import asyncio
 import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from photo_frame import add_frame
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
 
 @dp.message()
 async def handle_photo_with_caption(message: Message):
     if not message.photo or not message.caption:
-        await message.reply("❗ Пожалуйста, отправьте одно фото с подписью из трёх строк:\n\n<цвет>\n<толщина>\n<соотношение>")
+        await message.reply("❗ Пожалуйста, отправьте одно фото с подписью из трёх строк:\n<цвет>\n<толщина>\n<соотношение>")
         return
 
-    # Проверка и парсинг настроек
     lines = message.caption.strip().splitlines()
     if len(lines) != 3:
         await message.reply("❗ Подпись должна содержать ровно три строки:\n<цвет>\n<толщина>\n<соотношение>")
@@ -30,14 +29,14 @@ async def handle_photo_with_caption(message: Message):
 
     color, thickness, aspect = lines
 
-    # Скачиваем фото
-    photo = message.photo[-1]
     try:
+        photo = message.photo[-1]
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.jpg")
             output_path = os.path.join(tmpdir, "output.jpg")
 
-            await photo.download_to_disk(input_path)
+            await photo.download(destination=input_path)
+
             try:
                 add_frame(input_path, output_path, color, thickness, aspect)
             except Exception as e:
@@ -45,14 +44,14 @@ async def handle_photo_with_caption(message: Message):
                 return
 
             await message.reply_photo(types.FSInputFile(output_path), caption="✅ Готово!")
-    except Exception:
-        await message.reply("❗ Не удалось скачать или обработать изображение.")
+    except Exception as e:
+        await message.reply("❗ Не удалось обработать фото.")
+        logging.exception(e)
+
+
+async def main():
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    from aiogram import executor
-    from aiogram import Router
-
-    router = Router()
-    dp.include_router(router)
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
