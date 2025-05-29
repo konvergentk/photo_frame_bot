@@ -3,15 +3,15 @@ import tempfile
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message
 from aiogram.enums import ParseMode
+from aiogram.types import Message, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from photo_frame import add_frame
 
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -19,7 +19,7 @@ dp = Dispatcher(storage=MemoryStorage())
 @dp.message()
 async def handle_photo_with_caption(message: Message):
     if not message.photo or not message.caption:
-        await message.reply("❗ Пожалуйста, отправьте одно фото с подписью из трёх строк:\n<цвет>\n<толщина>\n<соотношение>")
+        await message.reply("❗ Пожалуйста, отправьте ОДНО фото с подписью из трёх строк:\n<цвет>\n<толщина>\n<соотношение>")
         return
 
     lines = message.caption.strip().splitlines()
@@ -31,11 +31,15 @@ async def handle_photo_with_caption(message: Message):
 
     try:
         photo = message.photo[-1]
+        file = await bot.get_file(photo.file_id)
+        file_data = await bot.download_file(file.file_path)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input.jpg")
             output_path = os.path.join(tmpdir, "output.jpg")
 
-            await photo.download(destination=input_path)
+            with open(input_path, "wb") as f:
+                f.write(file_data.read())
 
             try:
                 add_frame(input_path, output_path, color, thickness, aspect)
@@ -43,7 +47,7 @@ async def handle_photo_with_caption(message: Message):
                 await message.reply(f"❗ Ошибка обработки: {e}")
                 return
 
-            await message.reply_photo(types.FSInputFile(output_path), caption="✅ Готово!")
+            await message.reply_photo(FSInputFile(output_path), caption="✅ Готово!")
     except Exception as e:
         await message.reply("❗ Не удалось обработать фото.")
         logging.exception(e)
